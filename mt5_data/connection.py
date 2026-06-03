@@ -150,9 +150,13 @@ def initialize(
     if _initialized:
         return True
 
-    # 初始化 mt5 终端：path=None 表示使用本机默认安装的 MetaTrader 5。
+    # 初始化 mt5 终端。
+    # 注意：mt5 5.0.x 在 Windows 上不接受显式 ``path=None``，会返回错误码 -2
+    # "Invalid 'path' argument"。所以只在我们有具体路径时才传 path 关键字。
+    # 不传 path 时 mt5 会自动连接本机默认安装的 MetaTrader 5。
     # 该 API 在终端未启动/路径错误时返回 False，mt5.last_error() 含具体原因。
-    if not mt5.initialize(path=path):
+    init_kwargs = {"path": path} if path is not None else {}
+    if not mt5.initialize(**init_kwargs):
         print(f"[mt5_data] initialize() failed: {mt5.last_error()}")
         return False
 
