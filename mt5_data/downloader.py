@@ -9,6 +9,7 @@
 """
 
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import List, Optional, Union
 
 import pandas as pd
@@ -113,6 +114,9 @@ def fetch_rates(
     timeframe: Union[str, int],
     date_from: datetime,
     date_to: Optional[datetime] = None,
+    save_to_db: bool = False,
+    db_path: Optional[Union[str, Path]] = None,
+    notes: Optional[str] = None,
 ) -> pd.DataFrame:
     """下载指定品种在 [date_from, date_to] 区间内的 K 线数据。
 
@@ -122,6 +126,12 @@ def fetch_rates(
             也可直接传 ``mt5.TIMEFRAME_*`` 整型。
         date_from: 区间起始时间（含）。
         date_to: 区间结束时间（含）。为 ``None`` 时取到最新可用 K 线。
+        save_to_db: 是否把数据持久化到 ``data_labeling`` 的 SQLite 数据库。
+            默认为 ``False``（行为与之前完全一致，老调用零侵入）。
+            打开后会自动建 dataset + 批量写 candles。
+        db_path: SQLite 文件路径（``save_to_db=True`` 时生效）；
+            ``None`` 用 ``data_labeling.db.DEFAULT_DB_PATH``。
+        notes: 写入 ``datasets.notes`` 的可选备注（``save_to_db=True`` 时生效）。
 
     Returns:
         以 ``time`` 为索引的 ``pandas.DataFrame``，列固定为
@@ -133,7 +143,9 @@ def fetch_rates(
 
     Raises:
         RuntimeError: 终端未连接 / 数据区间无效 / mt5 内部错误 / 整列全空无法插值。
-        ValueError: 品种无法加入 MarketWatch（broker 未提供 / 名称拼写错误）。
+        ValueError: 品种无法加入 MarketWatch（broker 未提供 / 名称拼写错误）；
+            dataset 名称重复（``save_to_db=True`` 时）。
+        ImportError: ``save_to_db=True`` 但 ``data_labeling`` 包未安装。
     """
     # Step 1: 确保终端连接可用；连接失败时主动抛错。
     _ensure_initialized()
@@ -185,5 +197,30 @@ def fetch_rates(
     # Step 6: 设 time 为索引并按时间升序。
     # 排序是防御性的：个别 broker 历史数据可能存在轻微乱序。
     df = df.set_index("time").sort_index()
+
+    # Step 7: 可选落库（save_to_db=True 时）。
+    # 用延迟 import 避免「只 import mt5_data 时也强制加载 data_labeling」，
+    # 保持 mt5_data 自身依赖最少（向后兼容 + 测试隔离）。
+    if save_to_db:
+        try:
+            from data_labeling.persistence import import_from_mt5
+        except ImportError as e:
+            raise ImportError(
+                "save_to_db=True 需要 data_labeling 包；"
+                "请确认 data_labeling/ 与 mt5_data/ 同级，"
+                "或在 import 路径中可被找到。"
+            ) from e
+        # import_from_mt5 会再次调 fetch_rates，但这里 save_to_db=False 默认
+        # 不会触发递归落库；为彻底杜绝，把 save_to_db=False 显式传进去
+        # 是不必要的（import_from_mt5 内部不复用本函数）。
+        db_path_obj = Path(db_path) if db_path is not None else None
+        import_from_mt5(
+            symbol=symbol,
+            timeframe=str(timeframe),
+            date_from=date_from,
+            date_to=date_to,
+            db_path=db_path_obj,
+            notes=notes,
+        )
 
     return df
