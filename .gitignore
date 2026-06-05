@@ -1,0 +1,57 @@
+# Python 字节码缓存
+__pycache__/
+*.py[cod]
+*$py.class
+
+# 敏感配置 —— 绝不能提交到 git
+# 真实 mt5 凭据应放在用户主目录（%USERPROFILE%\.mt5_credentials.json），
+# 或通过环境变量 MT5_LOGIN / MT5_PASSWORD / MT5_SERVER 注入。
+*.credentials.json
+credentials.json
+mt5_credentials.json
+.env
+.env.*
+!.env.example
+
+# 临时模板保护：example 文件是公开模板，必须能提交
+!*.example.json
+!*.example
+!*.example.*
+
+# IDE
+.idea/
+.vscode/
+*.swp
+.DS_Store
+
+# 工具产物
+.trae/
+*.log
+*.tmp
+
+# 虚拟环境
+venv/
+.venv/
+env/
+
+# SQLite 数据库文件 —— 阶段 A data_labeling 用
+# 包含用户的下载数据 + 人工标签，是用户资产，绝不入库
+data_labeling/data.db
+data_labeling/data.db-journal
+data_labeling/data.db-wal
+data_labeling/data.db-shm
+*.db
+*.sqlite
+*.sqlite3
+
+# 阶段 B model_training 训练产物 —— artifacts 目录全部屏蔽
+# 含 .pkl (sklearn / stacker) / .txt (LightGBM booster) / .parquet (OOF) /
+# .json (eval_report / feature_spec / meta) / 子目录
+model_training/artifacts/
+model_training/artifacts/**
+model_training/artifacts/*.pkl
+model_training/artifacts/*.txt
+model_training/artifacts/*.parquet
+model_training/artifacts/*.csv
+model_training/artifacts/*/*.json
+model_training/artifacts/**/*.json
