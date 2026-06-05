@@ -47,7 +47,6 @@ class Credentials(NamedTuple):
 
 def load_credentials(
     config_path: Optional[os.PathLike] = None,
-    require_all: bool = True,
 ) -> Optional[Credentials]:
     """从环境变量或本地 JSON 文件加载 MT5 登录凭据。
 
@@ -59,11 +58,9 @@ def load_credentials(
 
     Args:
         config_path: 显式指定的凭据 JSON 文件路径。为 ``None`` 时按上述顺序自动查找。
-        require_all: 是否要求 ``login / password / server`` 三个字段全部存在。
-            为 ``False`` 时仅返回已有字段（用于部分覆盖环境变量）。
 
     Returns:
-        找到凭据时返回 :class:`Credentials`；所有来源都找不到或字段不完整时返回 ``None``。
+        找到凭据时返回 :class:`Credentials`；所有来源都找不到或 3 字段（login/password/server）任一缺失时返回 ``None``。
 
     Note:
         真实凭据文件应放在 git 仓库外；仓库内仅有 ``mt5_credentials.example.json`` 模板。
@@ -91,11 +88,8 @@ def load_credentials(
     password = env_password if env_password is not None else (file_creds.password if file_creds else None)
     server = env_server if env_server is not None else (file_creds.server if file_creds else None)
 
-    # 字段完整性校验。
+    # 字段完整性校验：3 字段任一缺失即返回 None。
     if login is None or password is None or server is None:
-        if require_all:
-            return None
-        # 部分返回（仅用于诊断场景）。
         return None
 
     try:
