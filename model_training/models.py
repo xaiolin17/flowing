@@ -18,10 +18,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, List, Optional, Tuple
+from typing import List, Tuple
 
 from typing_extensions import TypeAlias
-
 
 # ============================================================
 # FeatureSpec —— 因子 + 变化率特征规格

@@ -27,10 +27,9 @@ import sqlite3
 from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
-from typing import Iterable, Iterator, List, Optional, Sequence
+from typing import Iterator, List, Optional, Sequence
 
 from .models import Candle, Dataset, Label
-
 
 # ---- 默认 DB 路径：data_labeling/data.db ----
 DEFAULT_DB_PATH = Path(__file__).resolve().parent / "data.db"

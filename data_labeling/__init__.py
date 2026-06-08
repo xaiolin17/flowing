@@ -21,7 +21,7 @@ GUI 模块（``app.py`` / ``main.py``）只在使用 ``python data_labeling/main
 __version__ = "0.1.0"
 
 # 延迟到调用方触发 import 顶部导出，避免 DAO 单测被 PyQt5 拖入 sys.path。
-from .models import Dataset, Candle, Label  # noqa: E402
+from .models import Candle, Dataset, Label  # noqa: E402
 
 __all__ = [
     "Dataset",

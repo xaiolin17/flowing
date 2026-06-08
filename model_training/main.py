@@ -51,23 +51,17 @@ import numpy as np
 import pandas as pd
 
 # 顶层不 import lightgbm（延迟到 train_lightgbm 函数体内）
-from . import __version__, ARTIFACTS_DIR
+from . import ARTIFACTS_DIR, __version__
 from .data_loader import load_dataset
-from .evaluator import (
-    aggregate_eval,
-    compare_with_dummy,
-    compute_next_returns,
-    dummy_baseline,
-    evaluate,
-    serialize_eval,
-)
+from .evaluator import (aggregate_eval, compare_with_dummy,
+                        compute_next_returns, dummy_baseline, evaluate,
+                        serialize_eval)
 from .features import build_training_matrix, downsample_segment_merge
 from .imbalance import apply_imbalance
 from .models import DEFAULT_FACTOR_SPEC, FeatureSpec, ImbalanceMethod
 from .splitter import inner_walk_forward_splits, walk_forward_splits
 from .stacker import stack
 from .trainer import out_of_fold_predict, train_lightgbm
-
 
 # ============================================================
 # artifacts 目录结构（v2 完整 6 文件）
@@ -210,6 +204,7 @@ def _train_one_fold(
     elif model_type == "transformer":
         # 延迟导入 dl 子包
         from .dl.trainer import train_transformer
+
         # transformer 走 numpy 而非 DataFrame（内部用 numpy 构造序列）
         # X_used / X_test_changes 都是变化率 DataFrame，columns 已是
         # 白名单通过；to_numpy() 转 float32 防类型问题
@@ -477,8 +472,9 @@ def main(argv: Optional[List[str]] = None) -> int:
         return 1
 
     # 1) 加载数据
-    from .data_loader import list_datasets
     from data_labeling.db import DEFAULT_DB_PATH
+
+    from .data_loader import list_datasets
 
     # --synthetic 用临时 DB（覆盖默认）
     db_to_use = getattr(args, "_synthetic_db_path", None) or DEFAULT_DB_PATH
@@ -495,6 +491,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     factor_spec = DEFAULT_FACTOR_SPEC
     if args.max_fib_lag is not None:
         from dataclasses import replace
+
         # 自适应：保留 <= max_fib_lag 的 lags
         kept_lags = tuple(n for n in factor_spec.fib_lags if n <= args.max_fib_lag)
         if not kept_lags:
@@ -537,8 +534,10 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     # 阶段 C：构造 model_kwargs
     if args.model == "transformer":
-        from .dl.models import TransformerConfig
         from dataclasses import replace as _dc_replace
+
+        from .dl.models import TransformerConfig
+
         # 验证 n_heads 整除 d_model
         if args.d_model % args.n_heads != 0:
             print(f"[ERROR] d_model={args.d_model} 必须能被 n_heads={args.n_heads} 整除")

@@ -18,14 +18,12 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict, Optional, Tuple
+from typing import Tuple
 
 import numpy as np
 import pandas as pd
-from sklearn.dummy import DummyClassifier
 
 from .models import ImbalanceMethod
-
 
 # ============================================================
 # 4 基线 + 1 dummy baseline

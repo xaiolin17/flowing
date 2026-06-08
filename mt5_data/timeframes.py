@@ -10,7 +10,6 @@ from typing import Union
 
 import MetaTrader5 as mt5
 
-
 # 业务层字符串别名 -> mt5 原生常量。
 # 键必须保持大写，格式为「单位字母 + 数字」（M30、H1、D1）。
 # 新增/废弃时同步检查 mt5_data/__init__.py 是否对外导出。

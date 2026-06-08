@@ -36,7 +36,6 @@ if str(ROOT) not in sys.path:
 from data_labeling.db import CandleDAO, DatasetDAO, LabelDAO  # noqa: E402
 from data_labeling.models import Dataset  # noqa: E402
 
-
 # 进程内缓存：键 (ds_id, str(db_path)) -> (X_raw, y, is_labeled)
 _cache: Dict[Tuple[int, str], Tuple[pd.DataFrame, np.ndarray, np.ndarray]] = {}
 

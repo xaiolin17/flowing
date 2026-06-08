@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import argparse
 import sys
-from datetime import datetime, timedelta
+from datetime import datetime
 from pathlib import Path
 from typing import List
 
@@ -31,7 +31,8 @@ ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from data_labeling.db import CandleDAO, DatasetDAO, LabelDAO, init_db  # noqa: E402
+from data_labeling.db import (CandleDAO, DatasetDAO, LabelDAO,  # noqa: E402
+                              init_db)
 from data_labeling.models import Candle, Dataset  # noqa: E402
 from data_labeling.persistence import make_dataset_name  # noqa: E402
 

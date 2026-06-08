@@ -12,13 +12,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import List, Optional, Union
 
-import pandas as pd
-
 import MetaTrader5 as mt5
+import pandas as pd
 
 from .connection import initialize
 from .timeframes import parse_timeframe
-
 
 # 在下载后统一 drop 的列：Exness Trial 账户下 spread 恒为 280、real_volume 恒为 0，
 # 都没有业务信号意义；放在模块顶层常量便于后续扩展（比如新增 noise 列只需改这里）。

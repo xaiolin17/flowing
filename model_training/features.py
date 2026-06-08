@@ -23,11 +23,10 @@
 from __future__ import annotations
 
 import re
-from typing import List, Optional, Tuple
+from typing import Optional, Tuple
 
 import numpy as np
 import pandas as pd
-
 
 # ============================================================
 # 三分法列集合（v2 关键修正）

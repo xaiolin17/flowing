@@ -40,13 +40,8 @@ ARTIFACTS_DIR: Path = Path(__file__).resolve().parent / "artifacts"
 
 # 延迟到调用方触发 import 顶部导出，避免 model_training 包被外部模块 import 时
 # 把 dataclass 也强拉进来（外部只需 ARTIFACTS_DIR / __version__ 时可走 importlib）。
-from .models import (  # noqa: E402
-    DEFAULT_FACTOR_SPEC,
-    EvalReport,
-    FeatureSpec,
-    ImbalanceMethod,
-    SplitSpec,
-)
+from .models import (DEFAULT_FACTOR_SPEC, EvalReport,  # noqa: E402
+                     FeatureSpec, ImbalanceMethod, SplitSpec)
 
 __all__ = [
     "ARTIFACTS_DIR",

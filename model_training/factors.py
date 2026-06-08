@@ -22,13 +22,10 @@
 
 from __future__ import annotations
 
-from typing import Iterable, List, Tuple
-
 import numpy as np
 import pandas as pd
 
 from .models import FeatureSpec
-
 
 # ============================================================
 # 内部辅助函数（自实现）

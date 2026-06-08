@@ -23,13 +23,12 @@ import pickle  # noqa: F401  # 仅用于类型提示对比，运行时不用
 import random
 from dataclasses import asdict
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, Optional, Tuple
 
 import numpy as np
 
 # 顶部不 import torch（延迟到函数体内）
 from .models import TransformerConfig, build_model
-
 
 # ============================================================
 # 设备

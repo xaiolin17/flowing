@@ -20,7 +20,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from pathlib import Path
-from typing import List, Optional
+from typing import Optional
 
 # PyQt5 / pyqtgraph 延迟 import —— 见模块顶部 docstring。
 # 测试或 DAO 路径不应强制触发它们。
@@ -34,10 +34,10 @@ def _ensure_gui_deps():
     if PyQt5QtWidgets is not None:
         return
     try:
+        import pyqtgraph as _pg  # type: ignore
         from PyQt5 import QtCore as _QtCore  # type: ignore
         from PyQt5 import QtGui as _QtGui  # type: ignore
         from PyQt5 import QtWidgets as _QtWidgets  # type: ignore
-        import pyqtgraph as _pg  # type: ignore
     except ImportError as e:
         raise ImportError(
             "启动 GUI 需要 PyQt5 + pyqtgraph；"
@@ -347,13 +347,8 @@ class MainWindow:
         QtWidgets = PyQt5QtWidgets
 
         # 确保 DB 已建
-        from .db import (
-            DEFAULT_DB_PATH,
-            CandleDAO,
-            DatasetDAO,
-            LabelDAO,
-            init_db,
-        )
+        from .db import (DEFAULT_DB_PATH, CandleDAO, DatasetDAO, LabelDAO,
+                         init_db)
         if db_path is None:
             db_path = DEFAULT_DB_PATH
         init_db(db_path)

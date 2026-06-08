@@ -30,15 +30,10 @@ from typing import Any, Dict, List, Optional
 import numpy as np
 import pandas as pd
 from sklearn.dummy import DummyClassifier
-from sklearn.metrics import (
-    accuracy_score,
-    f1_score,
-    precision_recall_fscore_support,
-    roc_auc_score,
-)
+from sklearn.metrics import (accuracy_score, f1_score,
+                             precision_recall_fscore_support, roc_auc_score)
 
 from .models import EvalReport
-
 
 # ============================================================
 # 次日简单收益率

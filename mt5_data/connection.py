@@ -15,7 +15,6 @@ from typing import NamedTuple, Optional
 
 import MetaTrader5 as mt5
 
-
 # 本地跟踪当前是否已成功连接到 mt5 终端。
 # mt5 包未公开查询接口，因此我们在模块层维护状态；只读访问。
 _initialized: bool = False

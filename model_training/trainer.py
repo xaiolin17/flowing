@@ -20,12 +20,10 @@
 
 from __future__ import annotations
 
-import math
 from typing import Callable, Dict, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
-
 
 # ============================================================
 # Label mapping

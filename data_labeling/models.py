@@ -20,7 +20,6 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Optional
 
-
 # ---- 标签字面量（不在 Python 层强约束类型，DB 层是 INTEGER，方便后续扩展） ----
 LABEL_BUY: int = 1
 LABEL_SELL: int = -1
