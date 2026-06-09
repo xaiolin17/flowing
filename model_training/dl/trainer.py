@@ -19,7 +19,6 @@
 from __future__ import annotations
 
 import json
-import pickle  # noqa: F401  # 仅用于类型提示对比，运行时不用
 import random
 from dataclasses import asdict
 from pathlib import Path

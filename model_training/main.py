@@ -1,4 +1,4 @@
-﻿"""model_training CLI —— 阶段 B 一键训练入口。
+"""model_training CLI —— 阶段 B 一键训练入口。
 
 支持：
     * 外层 walk-forward 评估（n_splits 折）；
@@ -100,6 +100,47 @@ def _save_feature_spec(spec: FeatureSpec, path: Path) -> None:
         json.dump(payload, f, ensure_ascii=False, indent=2)
 
 
+def resolve_max_fib_lag(
+    value,
+    n_samples: int,
+    train_size_frac: float,
+    n_splits: int,
+    fib_lags: Tuple[int, ...],
+) -> Optional[int]:
+    """解析 ``--max-fib-lag`` 值：支持 ``None`` / ``"auto"`` / 显式 int。
+
+    算法（auto）：
+        * ``test_size = floor((n - floor(n*train_size_frac)) / n_splits)``；
+        * ``safe_max_lag = max(1, test_size - 1)``（留 1 行余量给
+          ``build_training_matrix`` 的 dropna）；
+        * 从 ``fib_lags`` 中选 ``<= safe_max_lag`` 的最大 lag。
+
+    Args:
+        value: 用户传入值（``None`` / ``"auto"`` / int）。
+        n_samples: 样本总数（``len(factor_df)``）。
+        train_size_frac: 外层 walk-forward 初始 train 比例。
+        n_splits: 外层 walk-forward 折数。
+        fib_lags: FeatureSpec 默认 fib_lags 列表。
+
+    Returns:
+        解析后的 max_lag。``None`` 表示用 spec 默认全集。
+    """
+    if value is None:
+        return None
+    if isinstance(value, str) and value.strip().lower() == "auto":
+        # 复刻 walk_forward_splits 公式（splitter.py）
+        initial = int(n_samples * train_size_frac)  # 等价 math.floor for float
+        test_size = int((n_samples - initial) / n_splits)
+        # 留 1 行 buffer：build_training_matrix 走 max_lag 行的 logret/delta 后会 dropna
+        safe_max_lag = max(1, test_size - 1)
+        kept = tuple(n for n in fib_lags if n <= safe_max_lag)
+        if not kept:
+            return min(fib_lags)  # 极端兜底
+        return max(kept)
+    # 显式 int
+    return int(value)
+
+
 def _save_meta(
     path: Path,
     *,
@@ -135,6 +176,40 @@ def _save_meta(
 # ============================================================
 # 单折训练 + 评估
 # ============================================================
+
+
+class _TransformerOOFWrapper:
+    """Transformer OOF 包装类：对齐 LightGBM OOF 接口。
+
+    设计：
+        * ``wrapper_inner.predict_proba`` 输出 ``(n - seq_len + 1, 3)``，与
+          ``n_in`` 差 ``seq_len - 1`` 行；
+        * **头部 pad** 用 NaN（让 ``out_of_fold_predict`` 内部对 NaN 行
+          不写 valid_mask，stacker 训练时这些行被过滤）；
+        * **边界**（n_in < seq_len）：返 ``(n_in, 3)`` 全 NaN，避免 stacker
+          学到 "1/3 占位" 的虚假模式（DLClassifierWrapper.predict_proba
+          在此情形返 1/3 占位，包装层改写为 NaN）。
+    """
+
+    def __init__(self, w):
+        self._w = w
+
+    def predict_proba(self, X):
+        n_in = len(X)
+        seq_len = self._w.cfg.seq_len
+        # 边界：n_in < seq_len → 无法构造序列 → 返 NaN
+        if n_in < seq_len:
+            return np.full((n_in, 3), np.nan, dtype=np.float32)
+        proba = self._w.predict_proba(X)
+        if len(proba) < n_in:
+            # 头部 pad：transformer 输出缺前 seq_len-1 行
+            pad = np.full(
+                (n_in - len(proba), proba.shape[1]),
+                np.nan, dtype=np.float32,
+            )
+            proba = np.concatenate([pad, proba], axis=0)
+        return proba
+
 
 
 def _train_one_fold(
@@ -288,24 +363,8 @@ def _train_one_fold(
                 )
                 # OOF 内部 out_of_fold_predict 调 m.predict_proba(X.iloc[test_idx])
                 # transformer predict_proba 输出 (n - seq_len + 1, 3)
-                # 与 test_idx 长度 (n_test) 差 seq_len-1
-                # 包装类：用 NaN 头部 padding（让 stacker 训练时用 valid_mask
-                # 过滤掉头部 pad 行，**不**被污染）
-                class _TransformerOOFWrapper:
-                    def __init__(self, w): self._w = w
-                    def predict_proba(self, X):
-                        proba = self._w.predict_proba(X)
-                        n_in = len(X)
-                        if len(proba) < n_in:
-                            # 头部 pad 用 **NaN**（不是 1/3 占位），让
-                            # out_of_fold_predict 内部对 NaN 行不写 valid_mask
-                            # → stacker 训练时用 valid_mask 过滤，**不**被污染
-                            pad = np.full(
-                                (n_in - len(proba), proba.shape[1]),
-                                np.nan, dtype=np.float32,
-                            )
-                            proba = np.concatenate([pad, proba], axis=0)
-                        return proba
+                # 与 test_idx 长度 (n_test) 差 seq_len-1 → 用 _TransformerOOFWrapper
+                # 处理头部 NaN pad + n<seq_len 边界
                 return _TransformerOOFWrapper(wrapper_inner)
 
         inner_splits = inner_walk_forward_splits(
@@ -400,8 +459,9 @@ def main(argv: Optional[List[str]] = None) -> int:
                         help="外层 walk-forward 初始 train 比例")
     parser.add_argument("--inner-train-size-frac", type=float, default=0.5,
                         help="内层 walk-forward 初始 train 比例")
-    parser.add_argument("--max-fib-lag", type=int, default=None,
-                        help="最大 fib lag（None=用 spec 默认；数据少时降级到 233 等）")
+    parser.add_argument("--max-fib-lag", type=str, default=None,
+                        help="最大 fib lag（None=用 spec 默认；数字=硬上限；"
+                             "auto=按 test_size 自适应降级，避免 n 小时 test 折 build 为空）")
 
     # ---- 阶段 C：模型层扩展 ----
     parser.add_argument("--model", type=str, default="lightgbm",
@@ -429,7 +489,8 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     # ---- 合成数据 ----
     parser.add_argument("--synthetic", action="store_true",
-                        help="用合成 10000 根 K 线训练（避免 dataset-id 必填）")
+                        help="用合成 K 线训练（避免 dataset-id 必填）；自动写临时 SQLite "
+                             "+ 进程退出时自动清理临时目录；label_count = 10% × n_rows")
     parser.add_argument("--synthetic-n-rows", type=int, default=10000,
                         help="合成 K 线数（默认 10000）")
     parser.add_argument("--synthetic-seed", type=int, default=42,
@@ -489,15 +550,27 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     # 2) 因子
     factor_spec = DEFAULT_FACTOR_SPEC
-    if args.max_fib_lag is not None:
+    # 解析 --max-fib-lag（支持 "auto" / int 字符串 / None）
+    n_raw = len(X_raw)
+    max_fib_lag_value: Optional[object] = args.max_fib_lag
+    if isinstance(max_fib_lag_value, str) and max_fib_lag_value.strip().isdigit():
+        max_fib_lag_value = int(max_fib_lag_value)
+    resolved_max_lag = resolve_max_fib_lag(
+        max_fib_lag_value,
+        n_samples=n_raw,
+        train_size_frac=args.train_size_frac,
+        n_splits=args.n_splits,
+        fib_lags=factor_spec.fib_lags,
+    )
+    if resolved_max_lag is not None:
         from dataclasses import replace
 
-        # 自适应：保留 <= max_fib_lag 的 lags
-        kept_lags = tuple(n for n in factor_spec.fib_lags if n <= args.max_fib_lag)
+        # 自适应：保留 <= resolved_max_lag 的 lags
+        kept_lags = tuple(n for n in factor_spec.fib_lags if n <= resolved_max_lag)
         if not kept_lags:
             kept_lags = (1, 2, 3, 5, 8)
         factor_spec = replace(factor_spec, fib_lags=kept_lags)
-        print(f"[INFO] 自适应 fib_lags（max={args.max_fib_lag}）: {kept_lags}")
+        print(f"[INFO] 自适应 fib_lags（max={resolved_max_lag}）: {kept_lags}")
 
     # 延迟 import factors（内部会 import pandas / numpy）
     from .factors import compute_factors
@@ -523,11 +596,11 @@ def main(argv: Optional[List[str]] = None) -> int:
     print(f"[INFO] artifacts 目录: {art_root}")
 
     # 6) 逐折训练 + 评估
-    all_real: List = []
-    all_dummy: List = []
-    all_compare: List[Dict[str, Any]] = []
-    oof_proba_per_fold: List[np.ndarray] = []
-    valid_mask_per_fold: List[np.ndarray] = []
+    all_real: list = []
+    all_dummy: list = []
+    all_compare: list[dict[str, Any]] = []
+    oof_proba_per_fold: list[np.ndarray] = []
+    valid_mask_per_fold: list[np.ndarray] = []
     last_model = None
     last_stacker = None
     last_inv_map = None
@@ -631,6 +704,17 @@ def main(argv: Optional[List[str]] = None) -> int:
         )
         # 严格对齐已在上文完成（valid_index 反推）。
 
+        # ----- 边界：test 折走 build 后为空 -----
+        # 触发条件：test 折长度 < max_fib_lag（默认 987），导致 compute_changes
+        # 的滞后列整列 NaN，build 内部 dropna 删光 → X_test_changes 长度为 0。
+        # 数据生成建议：总 K 线数 ≥ max_fib_lag + test_size，避免此边界。
+        # 工程做法：跳过该 fold（不评估、不聚合），记 warning，**不**抛错。
+        if len(X_test_changes) == 0 or int(is_labeled_test_built.sum()) == 0:
+            print(f"  [WARN] Fold {fold_idx + 1} test 折 build 后为空 "
+                  f"(n_test={len(test_idx)}, max_fib_lag={max(factor_spec.fib_lags)}); "
+                  "跳过该 fold。建议增大 n_splits 后的总 K 线数或降低 max_fib_lag。")
+            continue
+
 
         # ----- 单折训练 + 评估 -----
         result = _train_one_fold(
@@ -665,6 +749,18 @@ def main(argv: Optional[List[str]] = None) -> int:
               f"meaningful={cm['is_meaningful']}")
 
     # 7) 聚合
+    # 边界：所有 fold 都因 test 折为空被跳过时，all_real / all_dummy 为空
+    # → aggregate_eval([]) 会抛 ValueError。提前打印明确错误并返回 1。
+    if not all_real:
+        print(
+            f"[ERROR] 全部 {len(outer_splits)} 个 fold 都被跳过（test 折 build 后为空）。\n"
+            "  建议：\n"
+            "  1) 增大 --synthetic-n-rows（≥ 2000 + max_fib_lag），或\n"
+            "  2) 降低 --max-fib-lag（如 144），或\n"
+            "  3) 减少 --n-splits（让 test 折更大）。",
+            file=sys.stderr,
+        )
+        return 1
     agg_real = aggregate_eval(all_real)
     agg_dummy = aggregate_eval(all_dummy)
     print(f"\n=== Aggregate ({len(outer_splits)} folds) ===")
