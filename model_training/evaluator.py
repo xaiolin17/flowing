@@ -267,6 +267,10 @@ def serialize_eval(
         * auc
         * backtest_return
         * n_samples
+        * n_valid_folds（Section 3 新增）
+        * n_total_folds（Section 3 新增）
+        * is_meaningful_aggregate（Section 3 新增）
+        * fold_stability（Section 3 新增）
         * meta
         * compare（可选）
 
@@ -287,6 +291,10 @@ def serialize_eval(
         "auc": report.auc,
         "backtest_return": report.backtest_return,
         "n_samples": report.n_samples,
+        "n_valid_folds": report.n_valid_folds,
+        "n_total_folds": report.n_total_folds,
+        "is_meaningful_aggregate": report.is_meaningful_aggregate,
+        "fold_stability": report.fold_stability,
         "meta": report.meta,
     }
     if compare_dict is not None:
@@ -303,38 +311,129 @@ def serialize_eval(
 # 便捷：聚合多折评估
 # ============================================================
 
-def aggregate_eval(reports: List[EvalReport]) -> EvalReport:
-    """多折评估 → 聚合（均值）。
+def aggregate_eval(
+    reports: List[EvalReport],
+    min_meaningful_folds: int = 0,
+    compare_dicts: Optional[List[Dict[str, Any]]] = None,
+) -> EvalReport:
+    """多折评估 → 聚合（均值；Section 3 扩展支持 meaningful 过滤）。
 
     Args:
         reports: 多份 EvalReport。
+        min_meaningful_folds: 最少有效 fold 数（Section 3 新增）。
+            * ``0``（默认）= 保持原行为（不过滤）；
+            * ``> 0`` 时，要求 ``compare_dicts`` 提供每折 ``is_meaningful``，
+              过滤掉 ``is_meaningful=False`` 的 fold；
+            * 不足 ``min_meaningful_folds`` 时**不抛错**，但
+              ``is_meaningful_aggregate=False`` + meta 含 warning。
+        compare_dicts: 与 reports 一一对应的 compare_with_dummy 输出列表
+            （Section 3 新增；仅当 min_meaningful_folds>0 时需要）。
 
     Returns:
         一份聚合 EvalReport（accuracy/f1 等取均值，per_class 取均值）。
+        新增字段：
+            * ``n_valid_folds``：参与聚合的 fold 数；
+            * ``n_total_folds``：总 fold 数；
+            * ``is_meaningful_aggregate``：聚合层有意义标志；
+            * ``fold_stability``：{f1_std, f1_range, acc_std, acc_range}。
     """
     if not reports:
         raise ValueError("reports 为空")
-    n = len(reports)
+    n_total = len(reports)
     n_samples_total = sum(r.n_samples for r in reports)
-    if n_samples_total == 0:
-        return reports[0]
+
+    # 过滤 is_meaningful=False 的 fold（Section 3 新增）
+    warning_msg = None
+    if min_meaningful_folds > 0:
+        if compare_dicts is None:
+            raise ValueError(
+                "min_meaningful_folds>0 时必须传 compare_dicts"
+            )
+        if len(compare_dicts) != n_total:
+            raise ValueError(
+                f"compare_dicts 长度 {len(compare_dicts)} 与 reports 长度 "
+                f"{n_total} 不一致"
+            )
+        filtered = [
+            r for r, c in zip(reports, compare_dicts)
+            if c.get("is_meaningful", False)
+        ]
+        n_valid = len(filtered)
+        if n_valid < min_meaningful_folds:
+            # 不足时不抛错，is_meaningful_aggregate=False + warning
+            warning_msg = (
+                f"有效 fold 数 {n_valid}/{n_total} 不足 "
+                f"min_meaningful_folds={min_meaningful_folds}；"
+                f"is_meaningful_aggregate=False"
+            )
+            # 不足时仍聚合（用 n_valid 个 meaningful fold）
+            reports_to_agg = filtered
+        else:
+            reports_to_agg = filtered
+        is_meaningful_agg = (n_valid >= min_meaningful_folds)
+    else:
+        reports_to_agg = reports
+        n_valid = n_total
+        is_meaningful_agg = False  # 默认 0 = 不过滤，聚合层标志无意义
+
+    if not reports_to_agg:
+        # 极端：所有 fold 都被过滤
+        empty = EvalReport(
+            accuracy=0.0, f1_macro=0.0,
+            per_class_precision=[0.0, 0.0, 0.0],
+            per_class_recall=[0.0, 0.0, 0.0],
+            per_class_f1=[0.0, 0.0, 0.0],
+            auc=0.5, backtest_return=0.0, n_samples=0,
+            n_valid_folds=0, n_total_folds=n_total,
+            is_meaningful_aggregate=False,
+            fold_stability=None,
+            meta={"n_folds": n_total, "aggregated": True,
+                  "warning": warning_msg} if warning_msg
+            else {"n_folds": n_total, "aggregated": True},
+        )
+        return empty
+
+    # fold_stability 计算（基于 reports_to_agg）
+    f1_arr = [r.f1_macro for r in reports_to_agg]
+    acc_arr = [r.accuracy for r in reports_to_agg]
+    fold_stability = {
+        "f1_std": float(np.std(f1_arr, ddof=0)),
+        "f1_range": float(max(f1_arr) - min(f1_arr)),
+        "acc_std": float(np.std(acc_arr, ddof=0)),
+        "acc_range": float(max(acc_arr) - min(acc_arr)),
+    }
+
+    # n_samples 用过滤后的总量（与 reports_to_agg 一致）
+    n_samples_agg = sum(r.n_samples for r in reports_to_agg)
+    if n_samples_agg == 0:
+        return reports_to_agg[0]
+
+    meta = {"n_folds": n_valid, "aggregated": True,
+            "min_meaningful_folds": min_meaningful_folds}
+    if warning_msg:
+        meta["warning"] = warning_msg
+
     return EvalReport(
-        accuracy=float(np.mean([r.accuracy for r in reports])),
-        f1_macro=float(np.mean([r.f1_macro for r in reports])),
+        accuracy=float(np.mean([r.accuracy for r in reports_to_agg])),
+        f1_macro=float(np.mean([r.f1_macro for r in reports_to_agg])),
         per_class_precision=[
-            float(np.mean([r.per_class_precision[i] for r in reports]))
+            float(np.mean([r.per_class_precision[i] for r in reports_to_agg]))
             for i in range(3)
         ],
         per_class_recall=[
-            float(np.mean([r.per_class_recall[i] for r in reports]))
+            float(np.mean([r.per_class_recall[i] for r in reports_to_agg]))
             for i in range(3)
         ],
         per_class_f1=[
-            float(np.mean([r.per_class_f1[i] for r in reports]))
+            float(np.mean([r.per_class_f1[i] for r in reports_to_agg]))
             for i in range(3)
         ],
-        auc=float(np.mean([r.auc for r in reports])),
-        backtest_return=float(np.sum([r.backtest_return for r in reports])),
-        n_samples=int(n_samples_total),
-        meta={"n_folds": n, "aggregated": True},
+        auc=float(np.mean([r.auc for r in reports_to_agg])),
+        backtest_return=float(np.sum([r.backtest_return for r in reports_to_agg])),
+        n_samples=int(n_samples_agg),
+        n_valid_folds=n_valid,
+        n_total_folds=n_total,
+        is_meaningful_aggregate=is_meaningful_agg,
+        fold_stability=fold_stability,
+        meta=meta,
     )

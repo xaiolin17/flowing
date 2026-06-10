@@ -18,7 +18,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import List, Tuple
+from typing import List, Optional, Tuple
 
 from typing_extensions import TypeAlias
 
@@ -32,6 +32,9 @@ DEFAULT_FIB_LAGS: Tuple[int, ...] = (
     1, 2, 3, 5, 8, 13, 21, 34, 55, 89, 144, 233, 377, 610, 987,
 )
 
+# 默认 candle_windows：fib 9 元组（与 fib_lags 同风格）
+DEFAULT_CANDLE_WINDOWS: Tuple[int, ...] = (1, 2, 3, 5, 8, 13, 21, 34, 55)
+
 
 @dataclass(frozen=True)
 class FeatureSpec:
@@ -43,6 +46,7 @@ class FeatureSpec:
     Attributes:
         timeframe: K 线周期字符串（"M1" / "M5" / "M15" / "H1" / "D1" 等）。
         fib_lags: 变化率 lag 列表（默认 M1 全集）。
+        candle_windows: 虚拟 K 线窗口（默认 fib 9 元组 (1,2,3,5,8,13,21,34,55)）。
         ma_windows: 简单移动平均窗口列表（如 (5, 10, 20, 60)）。
         ema_windows: 指数移动平均窗口列表。
         rsi_windows: RSI 窗口列表（如 (6, 12, 24)）。
@@ -57,6 +61,7 @@ class FeatureSpec:
 
     timeframe: str
     fib_lags: Tuple[int, ...] = DEFAULT_FIB_LAGS
+    candle_windows: Tuple[int, ...] = DEFAULT_CANDLE_WINDOWS
     ma_windows: Tuple[int, ...] = (5, 10, 20, 60)
     ema_windows: Tuple[int, ...] = (5, 10, 20, 60)
     rsi_windows: Tuple[int, ...] = (6, 12, 24)
@@ -122,6 +127,10 @@ class EvalReport:
         auc: multi-class AUC（``multi_class='ovr'``）。
         backtest_return: 简易回测累计收益。
         n_samples: 评估样本数。
+        n_valid_folds: 聚合时有效 fold 数（Section 3 新增）。
+        n_total_folds: 聚合时总 fold 数（Section 3 新增）。
+        is_meaningful_aggregate: 聚合层有意义标志（Section 3 新增）。
+        fold_stability: fold 间一致性指标（Section 3 新增，Optional）。
         meta: 附加元数据（标签映射、回测参数等）。
     """
 
@@ -133,6 +142,11 @@ class EvalReport:
     auc: float
     backtest_return: float
     n_samples: int
+    # Section 3 新增（聚合层字段；单折 evaluate 时填默认值）
+    n_valid_folds: int = 0
+    n_total_folds: int = 0
+    is_meaningful_aggregate: bool = False
+    fold_stability: Optional[dict] = None
     meta: dict = field(default_factory=dict)
 
 

@@ -85,6 +85,7 @@ def _save_feature_spec(spec: FeatureSpec, path: Path) -> None:
     payload = {
         "timeframe": spec.timeframe,
         "fib_lags": list(spec.fib_lags),
+        "candle_windows": list(spec.candle_windows),
         "ma_windows": list(spec.ma_windows),
         "ema_windows": list(spec.ema_windows),
         "rsi_windows": list(spec.rsi_windows),
@@ -462,6 +463,20 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument("--max-fib-lag", type=str, default=None,
                         help="最大 fib lag（None=用 spec 默认；数字=硬上限；"
                              "auto=按 test_size 自适应降级，避免 n 小时 test 折 build 为空）")
+    parser.add_argument("--max-candle-window", type=int, default=None,
+                        help="最大虚拟 K 线窗口 N（None=用 spec 默认 fib 9 元组；"
+                             "数字=硬上限，保留 <= N 的 candle_windows）")
+    parser.add_argument("--min-meaningful-folds", type=int, default=0,
+                        help="聚合多折时最少有效 fold 数（Section 3 新增）。"
+                             "0=不过滤（默认）；>0=要求 >=N 个 is_meaningful=True fold，"
+                             "不足时 is_meaningful_aggregate=False + warning")
+    parser.add_argument("--registry-db", type=Path, default=None,
+                        help="模型注册表 SQLite DB 路径（Section 4 新增）。"
+                             "None=不写入注册表；"
+                             "默认 model_training/model_registry.db")
+    parser.add_argument("--log-level", type=str, default="INFO",
+                        choices=["DEBUG", "INFO", "WARNING", "ERROR"],
+                        help="日志级别（Section 5 新增；默认 INFO）")
 
     # ---- 阶段 C：模型层扩展 ----
     parser.add_argument("--model", type=str, default="lightgbm",
@@ -496,6 +511,13 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument("--synthetic-seed", type=int, default=42,
                         help="合成数据随机种子")
     args = parser.parse_args(argv)
+
+    # Section 5：结构化日志配置（顶部）
+    try:
+        from .logging import setup_logging
+    except ImportError:
+        from model_training.logging import setup_logging
+    setup_logging(level=args.log_level)
 
     # 优先级规则：--baseline-only True → 强制 --stacking none
     if args.baseline_only:
@@ -571,6 +593,17 @@ def main(argv: Optional[List[str]] = None) -> int:
             kept_lags = (1, 2, 3, 5, 8)
         factor_spec = replace(factor_spec, fib_lags=kept_lags)
         print(f"[INFO] 自适应 fib_lags（max={resolved_max_lag}）: {kept_lags}")
+
+    # 解析 --max-candle-window（Section 1 新增；与 --max-fib-lag 独立，不联动）
+    if args.max_candle_window is not None:
+        from dataclasses import replace as _dc_replace_cw
+
+        max_cw = int(args.max_candle_window)
+        kept_cw = tuple(n for n in factor_spec.candle_windows if n <= max_cw)
+        if not kept_cw:
+            kept_cw = (1, 2, 3)
+        factor_spec = _dc_replace_cw(factor_spec, candle_windows=kept_cw)
+        print(f"[INFO] 自适应 candle_windows（max={max_cw}）: {kept_cw}")
 
     # 延迟 import factors（内部会 import pandas / numpy）
     from .factors import compute_factors
@@ -761,8 +794,18 @@ def main(argv: Optional[List[str]] = None) -> int:
             file=sys.stderr,
         )
         return 1
-    agg_real = aggregate_eval(all_real)
+    agg_real = aggregate_eval(
+        all_real,
+        min_meaningful_folds=args.min_meaningful_folds,
+        compare_dicts=all_compare if args.min_meaningful_folds > 0 else None,
+    )
     agg_dummy = aggregate_eval(all_dummy)
+    # Section 3：聚合层 warning
+    if agg_real.meta.get("warning"):
+        print(f"  [WARN] {agg_real.meta['warning']}")
+    n_invalid = agg_real.n_total_folds - agg_real.n_valid_folds
+    if n_invalid > 0:
+        print(f"  [WARN] {n_invalid}/{agg_real.n_total_folds} folds is_meaningful=False")
     print(f"\n=== Aggregate ({len(outer_splits)} folds) ===")
     print(f"  acc={agg_real.accuracy:.3f} f1={agg_real.f1_macro:.3f} "
           f"auc={agg_real.auc:.3f} backtest={agg_real.backtest_return:.4f}")
@@ -815,7 +858,54 @@ def main(argv: Optional[List[str]] = None) -> int:
     )
 
     print(f"\n[INFO] artifacts 已落盘到 {art_root}")
+    # Section 5：结构化日志（关键事件）
+    try:
+        from .logging import get_logger
+    except ImportError:
+        from model_training.logging import get_logger
+    _log = get_logger("model_training.main")
+    _log.info("artifacts saved", extra={
+        "artifact_dir": str(art_root),
+        "f1_macro": float(agg_real.f1_macro),
+        "n_features": int(agg_real.n_samples),
+    })
     print(f"[INFO] 耗时 {time.time() - t0:.1f}s")
+
+    # 8.7 模型注册表（Section 4 新增；可选）
+    if args.registry_db is not None:
+        try:
+            from .registry import RunRecord, register_run
+        except ImportError:
+            from model_training.registry import RunRecord, register_run
+        import datetime as _dt_reg
+        # 从 meta.json 读 model_signature（若有）
+        import json as _json_reg
+        sig = ""
+        meta_json_path = art_root / "meta.json"
+        if meta_json_path.exists():
+            try:
+                with open(meta_json_path) as _f:
+                    sig = _json_reg.load(_f).get("model_signature", "")
+            except Exception:
+                sig = ""
+        rec = RunRecord(
+            dataset_id=args.dataset_id,
+            model_type=args.model,
+            imbalance=args.imbalance,
+            stacking=args.stacking,
+            timestamp=_dt_reg.datetime.now(_dt_reg.timezone.utc).isoformat(),
+            f1_macro=float(agg_real.f1_macro),
+            f1_delta=float(compare_agg.get("f1_delta", 0.0)),
+            is_meaningful=bool(compare_agg.get("is_meaningful", False)),
+            artifact_dir=str(art_root),
+            model_signature=sig,
+        )
+        try:
+            register_run(args.registry_db, rec)
+            print(f"[INFO] 已注册到 {args.registry_db}")
+        except Exception as _e:  # noqa: BLE001
+            print(f"[WARN] 注册到 DB 失败: {_e}", file=__import__("sys").stderr)
+
     return 0
 
 

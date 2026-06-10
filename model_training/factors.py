@@ -283,4 +283,19 @@ def compute_factors(factor_spec: FeatureSpec, df: pd.DataFrame) -> pd.DataFrame:
     for n in factor_spec.vma_windows:
         out[f"vma{n}"] = _sma(vol, n)
 
+    # ---- 虚拟 K 线特征（Section 1 新增）----
+    # 追加 2 × len(candle_windows) 列（不与现有 29 列混合，向后兼容）
+    if factor_spec.candle_windows:
+        from .candle_features import compute_candle_window_features
+
+        ohlc_df = pd.DataFrame({
+            "open": open_s,
+            "high": high,
+            "low": low,
+            "close": close,
+        })
+        cw_df = compute_candle_window_features(ohlc_df, factor_spec.candle_windows)
+        for col in cw_df.columns:
+            out[col] = cw_df[col]
+
     return out

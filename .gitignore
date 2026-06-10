@@ -47,7 +47,9 @@ data_labeling/data.db-shm
 # 阶段 B model_training 训练产物 —— artifacts 目录全部屏蔽
 # 含 .pkl (sklearn / stacker) / .txt (LightGBM booster) / .parquet (OOF) /
 # .json (eval_report / feature_spec / meta) / 子目录
+# 模型 artifacts（Section 4：注册表 DB 也排除）
 model_training/artifacts/
+model_training/model_registry.db
 model_training/artifacts/**
 model_training/artifacts/*.pkl
 model_training/artifacts/*.txt
